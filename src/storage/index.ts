@@ -3,12 +3,16 @@ import type { AccountScrapeResult, TransactionRow } from "../types.js";
 import { LocalJsonStorage } from "./json.js";
 import { GoogleSheetsStorage } from "./sheets.js";
 import { AzureDataExplorerStorage } from "./azure-data-explorer.js";
-import { transactionHash } from "./utils.js";
+import { transactionHash, transactionUniqueId } from "./utils.js";
+import { YNABStorage } from "./ynab.js";
+import { BuxferStorage } from "./buxfer.js";
 
 export const storages = [
   new LocalJsonStorage(),
   new GoogleSheetsStorage(),
   new AzureDataExplorerStorage(),
+  new YNABStorage(),
+  new BuxferStorage(),
 ].filter((s) => s.canSave());
 
 export async function initializeStorage() {
@@ -24,7 +28,7 @@ export async function saveResults(results: Array<AccountScrapeResult>) {
 
   if (txns.length) {
     const res = await Promise.all(
-      storages.map((s) => s.saveTransactions(txns))
+      storages.map((s) => s.saveTransactions(txns)),
     );
 
     return {
@@ -39,7 +43,7 @@ export async function saveResults(results: Array<AccountScrapeResult>) {
 }
 
 function resultsToTransactions(
-  results: Array<AccountScrapeResult>
+  results: Array<AccountScrapeResult>,
 ): Array<TransactionRow> {
   const txns: Array<TransactionRow> = [];
 
@@ -49,8 +53,10 @@ function resultsToTransactions(
         for (let tx of account.txns) {
           txns.push({
             ...tx,
-            hash: transactionHash(tx, companyId, account.accountNumber),
             account: account.accountNumber,
+            companyId,
+            hash: transactionHash(tx, companyId, account.accountNumber),
+            uniqueId: transactionUniqueId(tx, companyId, account.accountNumber),
           });
         }
       }

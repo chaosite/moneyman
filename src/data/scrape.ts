@@ -8,7 +8,8 @@ const logger = createLogger("scrape");
 export async function getAccountTransactions(
   account: AccountConfig,
   startDate: Date,
-  onProgress: (companyId: string, status: string) => void
+  futureMonthsToScrape: number,
+  onProgress: (companyId: string, status: string) => void,
 ): Promise<ScraperScrapingResult> {
   logger(`started`);
   try {
@@ -16,6 +17,9 @@ export async function getAccountTransactions(
       startDate,
       companyId: account.companyId,
       args: ["--disable-dev-shm-usage", "--no-sandbox"],
+      futureMonthsToScrape: Number.isNaN(futureMonthsToScrape)
+        ? undefined
+        : futureMonthsToScrape,
     });
 
     scraper.onProgress((companyId, { type }) => {

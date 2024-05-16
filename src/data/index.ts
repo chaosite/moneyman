@@ -1,7 +1,6 @@
 import { performance } from "perf_hooks";
 import { getAccountTransactions } from "./scrape.js";
 import { AccountConfig, AccountScrapeResult } from "../types";
-import { editMessage } from "../notifier.js";
 import { createLogger } from "../utils/logger.js";
 
 const logger = createLogger("data");
@@ -9,12 +8,19 @@ const logger = createLogger("data");
 export async function scrapeAccounts(
   accounts: Array<AccountConfig>,
   startDate: Date,
-  statusMessageId?: number
+  futureMonthsToScrape: number,
+  scrapeStatusChanged?: (
+    status: Array<string>,
+    totalTime?: number,
+  ) => Promise<void>,
 ) {
   const start = performance.now();
 
   logger(`scraping %d accounts`, accounts.length);
   logger(`start date %s`, startDate.toISOString());
+  if (!Number.isNaN(futureMonthsToScrape)) {
+    logger(`months to scrap: %d`, futureMonthsToScrape);
+  }
 
   const status: Array<string> = [];
   const results: Array<AccountScrapeResult> = [];
@@ -23,10 +29,15 @@ export async function scrapeAccounts(
     const account = accounts[i];
 
     logger(`scraping account #${i} (type=${account.companyId})`);
-    const result = await scrapeAccount(account, startDate, async (message) => {
-      status[i] = message;
-      await editMessage(statusMessageId, status.join("\n"));
-    });
+    const result = await scrapeAccount(
+      account,
+      startDate,
+      futureMonthsToScrape,
+      async (message) => {
+        status[i] = message;
+        await scrapeStatusChanged?.(status);
+      },
+    );
 
     results.push({
       companyId: account.companyId,
@@ -38,16 +49,13 @@ export async function scrapeAccounts(
   logger(`scraping ended`);
   const stats = getStats(results);
   logger(
-    `Got ${stats.transactions} transactions from ${stats.accounts} accounts`
+    `Got ${stats.transactions} transactions from ${stats.accounts} accounts`,
   );
 
   const duration = (performance.now() - start) / 1000;
   logger(`total duration: ${duration}s`);
 
-  await editMessage(
-    statusMessageId,
-    `${status.join("\n")}\n\ntotal time: ${duration.toFixed(1)}s`
-  );
+  await scrapeStatusChanged?.(status, duration);
 
   return results;
 }
@@ -55,12 +63,16 @@ export async function scrapeAccounts(
 export async function scrapeAccount(
   account: AccountConfig,
   startDate: Date,
-  setStatusMessage: (message: string) => Promise<void>
+  futureMonthsToScrape: number,
+  setStatusMessage: (message: string) => Promise<void>,
 ) {
   let message = "";
   const start = performance.now();
-  const result = await getAccountTransactions(account, startDate, (cid, step) =>
-    setStatusMessage((message = `[${cid}] ${step}`))
+  const result = await getAccountTransactions(
+    account,
+    startDate,
+    futureMonthsToScrape,
+    (cid, step) => setStatusMessage((message = `[${cid}] ${step}`)),
   );
 
   const duration = (performance.now() - start) / 1000;

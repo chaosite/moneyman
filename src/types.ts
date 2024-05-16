@@ -4,14 +4,17 @@ import type {
   ScraperScrapingResult,
   ScraperCredentials,
 } from "israeli-bank-scrapers";
+export type { Transaction };
 
 export type AccountConfig = ScraperCredentials & {
   companyId: CompanyTypes;
 };
 
 export interface TransactionRow extends Transaction {
-  hash: string;
   account: string;
+  companyId: CompanyTypes;
+  hash: string;
+  uniqueId: string;
 }
 
 export interface AccountScrapeResult {
@@ -34,6 +37,7 @@ export interface SaveStats {
   pending: number;
   skipped: number;
   existing: number;
+  highlightedTransactions?: Record<string, Array<TransactionRow>>;
 }
 
 export interface TransactionStorage {

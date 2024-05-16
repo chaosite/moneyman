@@ -1,14 +1,6 @@
 import { Telegraf, TelegramError } from "telegraf";
 import { Message } from "telegraf/typings/core/types/typegram";
-import {
-  daysBackToScrape,
-  scrapeStartDate,
-  TELEGRAM_API_KEY,
-  TELEGRAM_CHAT_ID,
-  worksheetName,
-} from "./config.js";
-import { TransactionStatuses } from "israeli-bank-scrapers/lib/transactions.js";
-import type { AccountScrapeResult, SaveStats } from "./types.js";
+import { TELEGRAM_API_KEY, TELEGRAM_CHAT_ID } from "./config.js";
 import { createLogger, logToPublicLog } from "./utils/logger.js";
 
 const logger = createLogger("notifier");
@@ -19,11 +11,18 @@ const bot =
 logToPublicLog(
   bot
     ? "Telegram logger initialized, status and errors will be sent"
-    : "No Telegram bot info, status and errors will not be sent"
+    : "No Telegram bot info, status and errors will not be sent",
 );
 
 export async function send(message: string) {
   logger(message);
+  if (message.length > 4096) {
+    send(`Next message is too long (${message.length} characters), truncating`);
+    return await bot?.telegram.sendMessage(
+      TELEGRAM_CHAT_ID,
+      message.slice(0, 4096),
+    );
+  }
   return await bot?.telegram.sendMessage(TELEGRAM_CHAT_ID, message);
 }
 
@@ -33,7 +32,7 @@ export async function deleteMessage(message: Message.TextMessage) {
 
 export async function editMessage(
   message: number | undefined,
-  newText: string
+  newText: string,
 ) {
   if (message !== undefined) {
     try {
@@ -41,7 +40,7 @@ export async function editMessage(
         TELEGRAM_CHAT_ID,
         message,
         undefined,
-        newText
+        newText,
       );
     } catch (e) {
       if (canIgnoreTelegramError(e)) {
@@ -65,63 +64,27 @@ export function sendError(message: any, caller: string = "") {
     `${caller}\n❌ ${String(
       message instanceof Error
         ? `${message.message}\n${message.stack}`
-        : message
-    )}`.trim()
+        : message,
+    )}`.trim(),
   );
 }
 
-export function getSummaryMessage(
-  results: Array<AccountScrapeResult>,
-  stats: Array<SaveStats>
+const deprecationMessages = {
+  ["hashFiledChange"]: `This run is using the old transaction hash field, please update to the new one (it might require manual de-duping of some transactions). See https://github.com/daniel-hauser/moneyman/issues/268 for more details.`,
+} as const;
+const { HIDDEN_DEPRECATIONS = "" } = process.env;
+logger(`Hidden deprecations: ${HIDDEN_DEPRECATIONS}`);
+
+const sentDeprecationMessages = new Set<string>(HIDDEN_DEPRECATIONS.split(","));
+
+export function sendDeprecationMessage(
+  messageId: keyof typeof deprecationMessages,
 ) {
-  const accountsSummary = results.flatMap(({ result, companyId }) => {
-    if (!result.success) {
-      return `\t❌ [${companyId}] ${result.errorType}${
-        result.errorMessage ? `\n\t${result.errorMessage}` : ""
-      }`;
-    }
-    return result.accounts?.map(
-      (account) =>
-        `\t✔️ [${companyId}] ${account.accountNumber}: ${account.txns.length}`
-    );
-  });
-
-  const saveSummary = stats.map((s) => statsString(s));
-
-  return `
-Accounts updated:
-${accountsSummary.join("\n") || "\t😶 None"}
-Saved to:
-${saveSummary.join("\n") || "\t😶 None"}
-${getPendingSummary(results)}
-`.trim();
-}
-
-export function getConfigSummary() {
-  return `
-Config:
-  Worksheet name: ${worksheetName}
-  Start Date: ${scrapeStartDate.toISOString()} (${daysBackToScrape} days back)
-  TZ: ${Intl.DateTimeFormat().resolvedOptions().timeZone}
-  `;
-}
-
-function getPendingSummary(results: Array<AccountScrapeResult>) {
-  const pending = results
-    .flatMap(({ result }) => result.accounts)
-    .flatMap((account) => account?.txns)
-    .filter(Boolean)
-    .filter((t) => t?.status === TransactionStatuses.Pending);
-
-  return pending.length
-    ? `Pending txns:\n${pending.map((t) => t?.description).join("\n")}`
-    : "";
-}
-
-function statsString(starts: SaveStats): string {
-  return `
-  📝 ${starts.name} (${starts.table})
-    ${starts.added} added, ${starts.skipped} skipped
-    (${starts.existing} existing,  ${starts.pending} pending)
-`.trim();
+  if (sentDeprecationMessages.has(messageId)) {
+    return;
+  }
+  // Avoid sending the same message multiple times
+  sentDeprecationMessages.add(messageId);
+  return send(`⚠️ Deprecation warning:
+${deprecationMessages[messageId]}`);
 }
