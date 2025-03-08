@@ -2,12 +2,9 @@ import {
   TransactionStatuses,
   TransactionTypes,
 } from "israeli-bank-scrapers/lib/transactions.js";
-import {
-  AccountScrapeResult,
-  SaveStats,
-  Transaction,
-  TransactionRow,
-} from "./types";
+import { AccountScrapeResult, Transaction } from "../types.js";
+import { normalizeCurrency } from "../utils/currency.js";
+import { Timer } from "../utils/Timer.js";
 
 export function getSummaryMessages(results: Array<AccountScrapeResult>) {
   const accountsSummary = results.flatMap(({ result, companyId }) => {
@@ -24,18 +21,15 @@ export function getSummaryMessages(results: Array<AccountScrapeResult>) {
 
   const { pending, completed } = transactionsByStatus(results);
 
-  return [
-    `
+  return `
 ${transactionsString(pending, completed)}
 
 Accounts updated:
-${accountsSummary.join("\n") || "\t😶 None"}`.trim(),
-    `
--------
+${accountsSummary.join("\n") || "\t😶 None"}
+
 Pending txns:
 ${transactionList(pending) || "\t😶 None"}
-`.trim(),
-  ].join();
+`.trim();
 }
 
 function transactionsString(
@@ -46,9 +40,26 @@ function transactionsString(
 
   return `
 ${total} transactions scraped.
-${
-  total > 0 ? `(${pending.length} pending, ${completed.length} completed)` : ""
-}`.trim();
+${total > 0 ? `(${pending.length} pending, ${completed.length} completed)` : ""}
+${foreignTransactionsSummary(completed)}
+`.trim();
+}
+
+function foreignTransactionsSummary(completed: Array<Transaction>) {
+  const original = completed.filter(
+    (tx) => normalizeCurrency(tx.originalCurrency) !== "ILS",
+  ).length;
+
+  if (original === 0) {
+    return "";
+  }
+
+  const charged = completed.filter(
+    (tx) => normalizeCurrency(tx.chargedCurrency) !== "ILS",
+  ).length;
+  return `From completed, ${original} not originally in ILS${
+    charged ? ` and ${charged} not charged in ILS` : ""
+  }`;
 }
 
 function transactionAmount(t: Transaction): number {
@@ -76,18 +87,16 @@ function transactionString(t: Transaction) {
   }`;
 }
 
-function transactionList(transactions: Array<Transaction>, indent = "\t") {
+export function transactionList(
+  transactions: Array<Transaction>,
+  indent = "\t",
+) {
   return transactions.map((t) => `${indent}${transactionString(t)}`).join("\n");
 }
 
-export function statsString(stats: SaveStats): string {
-  return `
-📝 ${stats.name} (${stats.table})
-\t${stats.added} added
-\t${stats.skipped} skipped (${stats.existing} existing, ${
-    stats.pending
-  } pending)
-${highlightedTransactionsString(stats.highlightedTransactions, 1)}`.trim();
+export function saving(storage: string, steps: Array<Timer> = []) {
+  const stepsString = steps.map((s) => `\t${s}`).join("\n");
+  return `📝 ${storage} Saving...\n${stepsString}`.trim();
 }
 
 function transactionsByStatus(results: Array<AccountScrapeResult>) {
@@ -108,23 +117,4 @@ function transactionsByStatus(results: Array<AccountScrapeResult>) {
     pending: pendingTxns,
     completed: scrapedTxns,
   };
-}
-
-function highlightedTransactionsString(
-  groups: Record<string, TransactionRow[]> | undefined,
-  indent = 0,
-) {
-  if (!groups || Object.keys(groups).length === 0) {
-    return "";
-  }
-
-  const indentString = "\t".repeat(indent);
-
-  return (
-    `${indentString}${"-".repeat(5)}\n` +
-    `${Object.entries(groups).map(([name, txns]) => {
-      const transactionsString = transactionList(txns, `${indentString}\t`);
-      return `${indentString}${name}:\n${transactionsString}`;
-    })}`
-  );
 }
